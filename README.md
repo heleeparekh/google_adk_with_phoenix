@@ -46,4 +46,8 @@ This project demonstrates how to create and manage different agents using the [G
     python math_assistant.py
     ```
 3. **View traces** in the Arize Phoenix dashboard.
+   
 <img width="1429" height="691" alt="image" src="https://github.com/user-attachments/assets/137290bd-00c2-4a6f-8a2a-82a749b5e05c" />
+
+<img width="1303" height="780" alt="image" src="https://github.com/user-attachments/assets/327c5f8e-dbe8-4fa8-8516-ed0a967fb69f" />
+
