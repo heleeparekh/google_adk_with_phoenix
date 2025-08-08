@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.adk_venv/
+venv/
+
+# VS Code
+.vscode/
+
+# Environment variables
+.env
+.env.*
