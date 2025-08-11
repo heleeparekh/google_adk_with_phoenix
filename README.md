@@ -52,6 +52,11 @@ This project demonstrates how to create and manage different agents using the [G
     python online_evals/eval_rag.py
     ```
 
+    <img width="1435" height="762" alt="image" src="https://github.com/user-attachments/assets/8280ce5d-32d2-4539-b09a-8adc62db5871" />
+    <br><br>
+    <img width="1130" height="764" alt="image" src="https://github.com/user-attachments/assets/3d06f748-5a72-43ed-937d-7ad99d0b71da" />
+
+
 ## RAG (Retrieval-Augmented Generation) Workflow
 
 The `rag/` folder demonstrates how to build and use a RAG pipeline over a CSV knowledge base, and how to evaluate its performance.
@@ -115,4 +120,6 @@ The `online_evals/` folder contains scripts to evaluate the quality of RAG agent
 3. **Evaluate the traces in Phoenix:**  
    `python online_evals/eval_rag.py`
 4. **View results and evaluations in the Arize Phoenix dashboard.**
+
+<img width="1254" height="674" alt="image" src="https://github.com/user-attachments/assets/0a83d085-6115-454e-8b7b-46cece7105ba" />
 
