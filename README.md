@@ -36,18 +36,83 @@ This project demonstrates how to create and manage different agents using the [G
     ```sh
     phoenix serve
     ```
-1. **Set required environment variables** for authentication and configuration.
-2. **Run an agent script** of your choice to start an agent and enable tracing. For example:
+2. **Set required environment variables** for authentication and configuration.
+3. **Run an agent script** of your choice to start an agent and enable tracing. For example:
     ```sh
-    python coding_agent.py
+    python agents/coding_agent.py
     ```
     or
     ```sh
-    python math_assistant.py
+    python agents/math_assistant.py
     ```
-3. **View traces** in the Arize Phoenix dashboard.
-   
-<img width="1429" height="691" alt="image" src="https://github.com/user-attachments/assets/137290bd-00c2-4a6f-8a2a-82a749b5e05c" />
+4. **View traces** in the Arize Phoenix dashboard.
+5. **(Optional) Run RAG or evaluation scripts** as needed:
+    ```sh
+    python rag/rag_agent_csv.py
+    python online_evals/eval_rag.py
+    ```
 
-<img width="1303" height="780" alt="image" src="https://github.com/user-attachments/assets/327c5f8e-dbe8-4fa8-8516-ed0a967fb69f" />
+## RAG (Retrieval-Augmented Generation) Workflow
+
+The `rag/` folder demonstrates how to build and use a RAG pipeline over a CSV knowledge base, and how to evaluate its performance.
+
+### RAG Scripts
+
+- **build_corpus_from_csv.py**  
+  Builds a searchable corpus from a CSV file (`rag_sample_qas_from_kis.csv`).  
+  This script chunks the knowledge base text and creates a BM25 index for efficient retrieval.  
+  **Run this first** to generate `corpus_index.pkl`:
+  ```sh
+  python rag/build_corpus_from_csv.py
+  ```
+
+- **rag_agent_csv.py**  
+  Runs a single RAG query using the indexed corpus.  
+  It retrieves relevant context chunks for a user query and generates an answer using an agent.  
+  Example usage:
+  ```sh
+  python rag/rag_agent_csv.py
+  ```
+
+- **run_batch.py**  
+  Runs a batch of queries (sampled from the CSV) through the RAG agent.  
+  Useful for testing and generating multiple traces for evaluation.
+  ```sh
+  python rag/run_batch.py
+  ```
+
+### RAG Data
+
+- **rag_sample_qas_from_kis.csv**  
+  The sample CSV file containing knowledge items, questions, and ground truth answers.
+- **corpus_index.pkl**  
+  The serialized BM25 index and chunked corpus, created by `build_corpus_from_csv.py`.
+
+---
+
+## Evaluation Workflow
+
+The `online_evals/` folder contains scripts to evaluate the quality of RAG agent outputs using LLM-based metrics.
+
+- **eval_rag.py**  
+  Evaluates the RAG agent’s traces stored in Arize Phoenix.  
+  It pulls LLM spans from the Phoenix project and runs two main evaluations:
+  - **Context Relevancy:** Checks if the retrieved context is relevant to the query.
+  - **Answer Faithfulness:** Checks if the generated answer is grounded in the retrieved context (not hallucinated).
+  
+  Results are logged back to Phoenix for visualization and analysis.
+  ```sh
+  python online_evals/eval_rag.py
+  ```
+
+## Typical RAG + Evaluation Workflow
+
+1. **Build the corpus index:**  
+   `python rag/build_corpus_from_csv.py`
+2. **Run RAG agent(s) to generate traces:**  
+   - Single query: `python rag/rag_agent_csv.py`
+   - Batch queries: `python rag/run_batch.py`
+3. **Evaluate the traces in Phoenix:**  
+   `python online_evals/eval_rag.py`
+4. **View results and evaluations in the Arize Phoenix dashboard.**
 
