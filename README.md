@@ -46,10 +46,10 @@ This project demonstrates how to create and manage different agents using the [G
     python agents/math_assistant.py
     ```
 4. **View traces** in the Arize Phoenix dashboard.
-5. **(Optional) Run RAG or evaluation scripts** as needed:
+5. **(Optional) Run evaluation scripts** as needed:
     ```sh
-    python rag/rag_agent_csv.py
     python online_evals/eval_rag.py
+    python online_evals/eval_toxicity.py
     ```
 
     <img width="1435" height="762" alt="image" src="https://github.com/user-attachments/assets/8280ce5d-32d2-4539-b09a-8adc62db5871" />

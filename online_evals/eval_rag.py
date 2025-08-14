@@ -1,174 +1,119 @@
-# eval_rag.py — evaluate ADK RAG agent from LLM spans (local Phoenix)
+# eval_rag.py — minimal RAG evals (Context Relevancy + Answer Faithfulness)
 
 import os
 import ast
-import json
 import pandas as pd
 import phoenix as px
-from phoenix.trace import SpanEvaluations
-from phoenix.evals import llm_classify, OpenAIModel, RAG_RELEVANCY_PROMPT_TEMPLATE
 from dotenv import load_dotenv
+from phoenix.trace import SpanEvaluations
+from phoenix.evals import OpenAIModel, llm_classify, RAG_RELEVANCY_PROMPT_TEMPLATE
 
-# ---------------------------
-# Setup
-# ---------------------------
 load_dotenv()
 
 PROJECT = os.getenv("PHOENIX_PROJECT", "adk-rag-csv")
-OPENAI_MODEL = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise SystemExit("OPENAI_API_KEY not set. Put it in .env or export it, then rerun.")
+JUDGE = OpenAIModel(model=os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o"),
+                    api_key=os.getenv("OPENAI_API_KEY"))
 
-client = px.Client()              # local Phoenix HTTP API
-judge = OpenAIModel(model=OPENAI_MODEL, api_key=OPENAI_API_KEY)
+client = px.Client()
 
-# ---------------------------
-# Helpers
-# ---------------------------
-def _safe_parse_obj(raw):
-    if raw is None:
-        return None
-    if isinstance(raw, (dict, list)):
-        return raw
-    if isinstance(raw, str):
-        for loader in (json.loads, ast.literal_eval):
-            try:
-                return loader(raw)
-            except Exception:
-                pass
-        return raw
-    return raw
+# --- compact but ADK-aware flattener for output_messages ---
+def flatten_msgs(x):
+    if isinstance(x, str):
+        return x.strip()
+    if isinstance(x, list):
+        parts = []
+        for m in x:
+            if not isinstance(m, dict):
+                parts.append(str(m)); continue
+            # common keys:
+            if "message.content" in m and m["message.content"]:
+                parts.append(str(m["message.content"]))
+            elif "message.contents" in m and isinstance(m["message.contents"], list):
+                for part in m["message.contents"]:
+                    if isinstance(part, dict):
+                        if "message_content.text" in part and part["message_content.text"]:
+                            parts.append(str(part["message_content.text"]))
+                        elif "text" in part and part["text"]:
+                            parts.append(str(part["text"]))
+            elif "content" in m and m["content"]:
+                parts.append(str(m["content"]))
+            elif "message" in m and isinstance(m["message"], dict) and m["message"].get("content"):
+                parts.append(str(m["message"]["content"]))
+        return " ".join(p for p in parts if p).strip()
+    return "" if x is None else str(x)
 
-def parse_msgs(raw) -> str:
-    val = _safe_parse_obj(raw)
-    if isinstance(val, list):
-        out = []
-        for m in val:
-            if isinstance(m, dict):
-                if "message.content" in m:
-                    out.append(str(m["message.content"]))
-                elif "message.contents" in m and isinstance(m["message.contents"], list):
-                    for part in m["message.contents"]:
-                        if isinstance(part, dict) and "message_content.text" in part:
-                            out.append(str(part["message_content.text"]))
-                elif "content" in m:
-                    out.append(str(m["content"]))
-            elif isinstance(m, str):
-                out.append(m)
-        return " ".join(out).strip()
-    if isinstance(val, str):
-        return val.strip()
-    return "" if val is None else str(val)
-
-# ---------------------------
-# Pull LLM spans and required columns directly
-# ---------------------------
+# --- fetch spans & required fields ---
 spans = client.get_spans_dataframe(project_name=PROJECT)
-if spans.empty:
-    raise SystemExit(f"No spans found for project '{PROJECT}'. Run rag_agent.py first.")
-
-# Keep only the LLM spans
-if "name" in spans.columns:
-    spans = spans[spans["name"] == "call_llm"].copy()
-if spans.empty:
-    raise SystemExit("No 'call_llm' spans found. Verify tracing and project name.")
-
-needed = [
+spans = spans[spans["name"] == "call_llm"][[
     "context.span_id",
     "attributes.llm.prompt_template.variables",
     "attributes.llm.output_messages",
-]
-missing = [c for c in needed if c not in spans.columns]
-if missing:
-    raise SystemExit(f"Missing columns on spans: {missing}")
+]].copy()
+if spans.empty:
+    raise SystemExit("No 'call_llm' spans found. Run your agent first.")
 
-# Build rows for the two evals from the prompt-template variables + model output
-rows_ctx, rows_faith = [], []
+# pull {query, context} and answer text
+def get_var(obj, key):
+    if isinstance(obj, str):
+        try:
+            obj = ast.literal_eval(obj)
+        except Exception:
+            return ""
+    return (obj or {}).get(key, "") if isinstance(obj, dict) else ""
 
-for _, r in spans.iterrows():
-    span_id = r["context.span_id"]
-    vars_obj = _safe_parse_obj(r.get("attributes.llm.prompt_template.variables"))
-    query_text = ""
-    context_text = ""
-    if isinstance(vars_obj, dict):
-        qv = vars_obj.get("query")
-        cv = vars_obj.get("context")
-        if isinstance(qv, str):
-            query_text = qv.strip()
-        if isinstance(cv, str):
-            context_text = cv.strip()
+spans["query"] = spans["attributes.llm.prompt_template.variables"].apply(lambda v: str(get_var(v, "query")).strip())
+spans["context"] = spans["attributes.llm.prompt_template.variables"].apply(lambda v: str(get_var(v, "context")).strip())
+spans["answer"] = spans["attributes.llm.output_messages"].apply(flatten_msgs)
 
-    answer_text = parse_msgs(r.get("attributes.llm.output_messages"))
+# ---------- Eval A: Context Relevancy (query vs context) ----------
+ctx_df = spans.loc[(spans["query"] != "") & (spans["context"] != ""), ["context.span_id"]].copy()
+if not ctx_df.empty:
+    ctx_df["input"] = spans.loc[ctx_df.index, "query"].values
+    ctx_df["reference"] = spans.loc[ctx_df.index, "context"].values
+    ctx_df = ctx_df.set_index("context.span_id")
 
-    if query_text and context_text:
-        rows_ctx.append({
-            "context.span_id": span_id,
-            "input": query_text,
-            "reference": context_text,
-        })
-    if answer_text and context_text:
-        rows_faith.append({
-            "context.span_id": span_id,
-            "input": answer_text,      # ANSWER
-            "reference": context_text, # CONTEXT
-        })
-
-# ---------------------------
-# Eval A: RAG Context Relevancy (query ↔ context)
-# ---------------------------
-if rows_ctx:
-    ctx_df = pd.DataFrame(rows_ctx).set_index("context.span_id")
     ctx_results = llm_classify(
         data=ctx_df,
-        model=judge,
+        model=JUDGE,
         template=RAG_RELEVANCY_PROMPT_TEMPLATE,
         rails=["relevant", "unrelated"],
-        concurrency=8,
         provide_explanation=True,
     )
+    ctx_results.index = ctx_df.index
+    ctx_results.index.name = "context.span_id"
     ctx_results["score"] = (ctx_results["label"].str.lower() == "relevant").astype(int)
-    client.log_evaluations(SpanEvaluations(
-        eval_name="RAG Context Relevancy",
-        dataframe=ctx_results
-    ))
+
+    client.log_evaluations(SpanEvaluations("RAG Context Relevancy", ctx_results))
     print(f"Logged {len(ctx_results)} rows for 'RAG Context Relevancy'.")
 else:
-    print("No rows for Context Relevancy (missing query/context variables).")
+    print("No rows for Context Relevancy (missing query/context).")
 
-# ---------------------------
-# Eval B: RAG Answer Faithfulness (answer ↔ context)
-# ---------------------------
-FAITHFULNESS_TEMPLATE = """You are a strict evaluator.
-Given CONTEXT and ANSWER, determine if the ANSWER is supported by the CONTEXT.
-Respond with exactly one label from: grounded, hallucinated.
-Only consider information present in CONTEXT; do not assume external knowledge.
+# ---------- Eval B: Answer Faithfulness (answer vs same context) ----------
+faith_df = spans.loc[(spans["answer"] != "") & (spans["context"] != ""), ["context.span_id"]].copy()
+if not faith_df.empty:
+    faith_df["input"] = spans.loc[faith_df.index, "answer"].values      # ANSWER
+    faith_df["reference"] = spans.loc[faith_df.index, "context"].values # CONTEXT
+    faith_df = faith_df.set_index("context.span_id")
 
-CONTEXT:
-{reference}
+    FAITHFULNESS_TEMPLATE = (
+        "You are a strict evaluator.\n"
+        "Given CONTEXT and ANSWER, determine if the ANSWER is supported by the CONTEXT.\n"
+        'Respond with exactly one label from: grounded, hallucinated.\n\n'
+        "CONTEXT:\n{reference}\n\nANSWER:\n{input}\n"
+    )
 
-ANSWER:
-{input}
-"""
-
-if rows_faith:
-    faith_df = pd.DataFrame(rows_faith).set_index("context.span_id")
     faith_results = llm_classify(
         data=faith_df,
-        model=judge,
+        model=JUDGE,
         template=FAITHFULNESS_TEMPLATE,
         rails=["grounded", "hallucinated"],
-        concurrency=8,
         provide_explanation=True,
     )
+    faith_results.index = faith_df.index
+    faith_results.index.name = "context.span_id"
     faith_results["score"] = (faith_results["label"].str.lower() == "grounded").astype(int)
-    client.log_evaluations(SpanEvaluations(
-        eval_name="RAG Answer Faithfulness",
-        dataframe=faith_results
-    ))
+
+    client.log_evaluations(SpanEvaluations("RAG Answer Faithfulness", faith_results))
     print(f"Logged {len(faith_results)} rows for 'RAG Answer Faithfulness'.")
 else:
-    print("No rows for Answer Faithfulness (missing answer or context).")
-
-print("Done. Open Phoenix (local UI) → project:", PROJECT)
-print("Open a 'call_llm' span → Annotations, or use the top-level Evaluations view.")
+    print("No rows for Answer Faithfulness (missing answer/context).")
