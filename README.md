@@ -122,4 +122,7 @@ The `online_evals/` folder contains scripts to evaluate the quality of RAG agent
 4. **View results and evaluations in the Arize Phoenix dashboard.**
 
 <img width="1254" height="674" alt="image" src="https://github.com/user-attachments/assets/0a83d085-6115-454e-8b7b-46cece7105ba" />
+<br><br>
+<img width="296" height="104" alt="image" src="https://github.com/user-attachments/assets/63185113-0458-4f5c-a174-e4c534c72ec2" />
+
 
